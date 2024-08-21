@@ -101,7 +101,7 @@ class Noisification_Strategy():
 
 
 class SlidingWindowDataset(Dataset):
-    device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     def __init__(self, tensor_data, window_size):
         """
         Initializes the dataset with sliding windows.
@@ -176,7 +176,7 @@ class SlidingWindowDataset(Dataset):
 
 class SlidingWindowDataLoader(DataLoader):
 
-    device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     #dtype = torch.float32
     def __init__(self, dataset, batch_size=32, shuffle=False, device=device):
         """
@@ -238,7 +238,7 @@ from torch.utils.data import Dataset, DataLoader
 import random
 
 class SlidingWindowDataset(Dataset):
-    device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     def __init__(self, data, window_size):
         """
         Initializes the dataset with sliding windows.
