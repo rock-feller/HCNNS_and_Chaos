@@ -72,7 +72,7 @@ class CustomLinear(nn.Linear):
 class ptf_cell(nn.Module):
 
     
-    device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     dtype =  torch.float32
 
     def __init__(self, n_obs: int, n_hid_vars: int , n_ext_vars : int):#, prob: float):#, drop_output: bool): #, s0_nature: str, train_s0: bool
@@ -190,7 +190,7 @@ class vanilla_cell(nn.Module):
 
     
 
-    device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     dtype = torch.float32 
     def __init__(self, n_obs: int, n_hid_vars: int , n_ext_vars:int):
         super(vanilla_cell, self).__init__()
@@ -288,7 +288,7 @@ class lstm_cell(nn.Module):
 
     
 
-    device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     dtype = torch.float32 
     def __init__(self, n_obs: int, n_hid_vars: int , n_ext_vars:int):
         super(lstm_cell, self).__init__()
@@ -486,7 +486,7 @@ class LargeSparse_cell(nn.Module):
 
     
 
-    device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     dtype = torch.float32 
     def __init__(self, n_obs: int, n_hid_vars: int, n_ext_vars : int, pct_zeroed_weights:float):
         super(LargeSparse_cell, self).__init__()

@@ -18,19 +18,21 @@ import pandas as pd
 
 class HCNNs_Climate_modelling_scenario():
 
+    #folder creation for Vanilla HCNN models
     folder_pre_trained_van = os.makedirs("results_climate_hcnns/abridged_models/van/",  exist_ok=True)
     folder_pre_tested_van = os.makedirs("results_climate_hcnns/fully_unfolded_models/van/", exist_ok=True)
     folder_trained_based_van = os.makedirs("results_climate_hcnns/train_based_models/van/", exist_ok=True)
-
+    #folder creation for HCNN-pTF models
     folder_pre_trained_ptf = os.makedirs("results_climate_hcnns/abridged_models/ptf/",  exist_ok=True)
     folder_pre_tested_ptf = os.makedirs("results_climate_hcnns/fully_unfolded_models/ptf/", exist_ok=True)
     folder_trained_based_ptf = os.makedirs("results_climate_hcnns/train_based_models/ptf/",  exist_ok=True)
 
-
+    #folder creation for HCNN-Lform models
     folder_pre_trained_lstmform = os.makedirs("results_climate_hcnns/abridged_models/lstmform/",  exist_ok=True)
     folder_pre_tested_lstmform = os.makedirs("results_climate_hcnns/fully_unfolded_models/lstmform/", exist_ok=True)
     folder_trained_based_lstmform = os.makedirs("results_climate_hcnns/train_based_models/lstmform/",  exist_ok=True)
 
+    #folder creation for HCNN-LSpa models
     folder_pre_trained_laSpa = os.makedirs("results_climate_hcnns/abridged_models/laSpa/",  exist_ok=True)
     folder_pre_tested_laSpa  = os.makedirs("results_climate_hcnns/fully_unfolded_models/laSpa/", exist_ok=True)
     folder_trained_based_laSpa = os.makedirs("results_climate_hcnns/train_based_models/laSpa/",  exist_ok=True)
