@@ -4,7 +4,7 @@ from typing import Tuple, Literal
 
 class RNNModelClimate(nn.Module):
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     dtype = torch.float32
 
     def __init__(self, input_size: int, hidden_size: int, output_size: int,
