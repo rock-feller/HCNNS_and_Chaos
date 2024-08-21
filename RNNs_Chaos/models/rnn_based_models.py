@@ -4,7 +4,7 @@ from typing import Tuple, Literal
 
 class RNNModel(nn.Module):
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     dtype = torch.float32
 
     def __init__(self, input_size: int, hidden_size: int, output_size: int,
@@ -89,7 +89,7 @@ class RNNModel(nn.Module):
 
 class LSTMModel(nn.Module):
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     dtype = torch.float32
 
     def __init__(self, input_size: int, hidden_size: int, output_size: int, s0_nature: Literal['zeros_', 'random_'],
@@ -134,7 +134,7 @@ class LSTMModel(nn.Module):
 
 class RNNModelClimate(nn.Module):
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     dtype = torch.float32
 
     def __init__(self, input_size: int, hidden_size: int, output_size: int,
@@ -188,7 +188,7 @@ class RNNModelClimate(nn.Module):
 
 class LSTMModelClimate(nn.Module):
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     dtype = torch.float32
 
     def __init__(self, input_size: int, hidden_size: int, output_size: int, s0_nature: Literal['zeros_', 'random_'],
