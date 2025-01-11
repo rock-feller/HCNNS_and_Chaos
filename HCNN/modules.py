@@ -345,7 +345,7 @@ class ptf_cell(nn.Module):
     # Compute the expected output (y_hat)
         expectation = torch.matmul(self.ConMat, state)
 
-        print("expectation requires_grad:", expectation.requires_grad)
+#print("expectation requires_grad:", expectation.requires_grad)
         if teacher_forcing:
 
             if observation is None:
