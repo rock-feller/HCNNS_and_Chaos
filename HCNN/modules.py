@@ -373,3 +373,45 @@ class ptf_cell(nn.Module):
             return expectation, next_state, None , None 
         
 
+
+
+class DiagonalMatrix(nn.Linear):
+    def __init__(self, in_features, out_features, bias=False, init_diag: Optional[float] = 1.0):
+        if in_features != out_features:
+            raise ValueError("DiagonalMatrix requires in_features to be equal to out_features for symmetry.")
+        super(DiagonalMatrix, self).__init__(in_features, out_features, bias=bias)
+
+        # Initialize the weight matrix
+        nn.init.constant_(self.weight, 0)  # Set all weights to zero
+        if init_diag is not None:
+            self.weight.data.fill_diagonal_(init_diag)  # User-specified or default value
+        else:
+            nn.init.uniform_(self.weight.data.fill_diagonal_(0), -1e-5, 1e-5)  # Random diagonal values
+
+
+        # Pre-compute and store the diagonal mask
+        self.register_buffer("mask", torch.eye(self.weight.shape[0], device=self.weight.device))
+
+        # Register hook
+        self.weight.register_hook(self._clamp_and_zero_out)
+
+
+    def _clamp_and_zero_out(self, grad):
+
+        """
+        Zero out off-diagonal elements and clamp diagonal values
+        Grad here, gradient_loss_wrt_weight.
+        """
+        with torch.no_grad():
+            self.weight.data = torch.mul(self.weight.data ,self.mask)  # Retain only diagonal elements
+            self.weight.data.clamp_(min=0., max=1)
+
+        return grad * self.mask  # Mask gradients to zero out off-diagonal elements
+    
+
+    def forward(self, input, verbose: bool = False):
+            if verbose:
+                print(f"Diagonal weights: {torch.diag(self.weight)}")
+            return nn.functional.linear(input, self.weight, self.bias)
+
+
