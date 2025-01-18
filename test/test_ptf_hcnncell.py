@@ -524,6 +524,7 @@ def test_ptf_cell_dropout_edge_cases():
 
 
 def test_ptf_hcnncell_recurrent():
+    
     """Test vanilla_hcnncell in a recurrent fashion over a sequence."""
 
     print("""This code will generate three things 
