@@ -245,7 +245,7 @@ class ptf_cell(nn.Module):
     """
 
 
-    def __init__(self, n_obs: int, 
+    def __init__(self, n_obs: int , 
                  n_hid_vars: int , 
                  init_range: Tuple[float,float] = (-0.75,0.75)):
 
@@ -415,3 +415,156 @@ class DiagonalMatrix(nn.Linear):
             return nn.functional.linear(input, self.weight, self.bias)
 
 
+
+class lstm_cell(nn.Module):
+    """
+    LSTM Formulation of the HCNN (LForm HCNN Cell).
+
+    This class implements the LSTM-inspired formulation of the HCNN Cell for state-based predictions and state transitions.
+    It incorporates a custom diagonal matrix transformation to enforce exponential embedding of the residual state.
+
+    Attributes
+    ----------
+    n_obs : int
+        Number of observed variables (output dimension).
+    n_hid_vars : int
+        Number of hidden variables (state dimension).
+    A : CustomLinear
+        Linear transformation module for processing the non-linear residual state.
+    D : DiagonalMatrix
+        Diagonal matrix transformation module for controlling the residual state dynamics.
+    ConMat : torch.Tensor
+        Connection matrix used for mapping hidden states to observations.
+    Ide : torch.Tensor
+        Identity matrix used in internal computations.
+    device : torch.device
+        The device (CPU, CUDA, or MPS) where the model and tensors are stored.
+
+    Methods
+    -------
+    _get_default_device() -> torch.device:
+        Determines the default device for computations.
+    forward(state: torch.Tensor, teacher_forcing: bool, observation: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+        Performs a forward pass through the LSTM HCNN Cell, computing predictions (`expectation`) 
+        and updating the internal state (`next_state`).
+    """
+
+
+
+    def __init__(self, n_obs: int, 
+                 n_hid_vars: int , 
+                 init_range: Tuple[float,float] = (-0.75,0.75)):
+
+        super(lstm_cell, self).__init__()
+        self.n_obs = n_obs
+        self.n_hid_vars = n_hid_vars
+
+        # Parameter initialization 
+         
+        self.A = CustomLinear(in_features = n_hid_vars, out_features =n_hid_vars , bias = False ,init_range = init_range)
+        
+        self.D = DiagonalMatrix(in_features =n_hid_vars, out_features =n_hid_vars , bias = False ,init_diag = 1.)
+
+        self.register_buffer(name = 'ConMat', tensor= torch.eye(n_obs, n_hid_vars), persistent = False)
+        
+        self.register_buffer(name = 'Ide', tensor= torch.eye(n_hid_vars ), persistent = False)
+
+        # Select device
+        self.device = self._get_default_device()
+        
+    def _get_default_device(self) -> torch.device:
+
+        """
+        Determines the default device to use for computations.
+
+        Returns
+        -------
+        torch.device
+            The default device (`cuda`, `mps`, or `cpu`).
+        """
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        elif torch.backends.mps.is_available():
+            return torch.device("mps")
+        else:
+            return torch.device("cpu")
+
+
+    def forward(self, state: torch.Tensor, teacher_forcing: bool,
+                observation: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+        """
+        Forward pass of the LSTM HCNN Cell.
+
+        Parameters
+        ----------
+        state : torch.Tensor, shape=(n_hid_vars,)
+            The current state tensor (`s_t`) of the HCNN, with shape `(n_hid_vars,)`.
+        teacher_forcing : bool
+            Whether to use teacher forcing for the state transition:
+            - True: Use the provided observation (`observation`) to guide the state transition.
+            - False: Compute the next state based on the model's prediction.
+        observation : Optional[torch.Tensor], default=None, shape=(n_obs,)
+            The ground-truth observation tensor (`y_true`) for time step `t`.
+            Required when `teacher_forcing` is True. Ignored otherwise.
+
+        Returns
+        -------
+        Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+            - expectation : torch.Tensor, shape=(n_obs,)
+                Predicted observation tensor (`y_hat`).
+            - next_state : torch.Tensor, shape=(n_hid_vars,)
+                Updated state tensor (`s_{t+1}`).
+            - delta_term : Optional[torch.Tensor], shape=(n_obs,)
+                Difference between the prediction and ground-truth (`y_hat - y_true`).
+                Returns None when `teacher_forcing` is False.
+
+        Raises
+        ------
+        ValueError
+            If `teacher_forcing` is True and `observation` is not provided.
+
+        Notes
+        -----
+        - When `teacher_forcing` is True, the method uses `observation` to compute a correction term 
+        (`delta_term`) for guiding the state transition.
+        - If `teacher_forcing` is False, the state transition is based purely on the model's prediction.
+
+        - State Transition Logic:
+            - Compute the residual state (`r_state`).
+            - Apply a non-linear transformation using the `CustomLinear` layer (`A`).
+            - Add an adjusted residual term using the diagonal matrix (`D`).
+        """
+
+    # Compute the expected output (y_hat)
+        expectation = torch.matmul(self.ConMat, state)
+
+        print("expectation requires_grad:", expectation.requires_grad)
+        if teacher_forcing:
+
+            if observation is None:
+                raise ValueError("`observation` must be provided when `teacher_forcing` is True.")
+
+            # Compute the delta term (y_true - y_hat)
+            delta_term = observation - expectation
+
+            # Teacher forcing: Correct the state using the delta term
+            teach_forc = torch.matmul(self.ConMat.T, delta_term)
+
+            r_state = state - teach_forc
+
+            lstm_block = self.A(torch.tanh(r_state)) -  r_state
+
+            next_state = r_state + self.D(lstm_block)
+
+
+            return expectation, next_state, delta_term
+        else:
+            # Without teacher forcing: State evolves independently
+            r_state = torch.matmul(self.Ide, state)
+            
+            lstm_block = self.A(torch.tanh(r_state)) -  r_state
+
+            next_state = r_state + self.D(lstm_block)
+
+
+            return expectation, next_state, None
