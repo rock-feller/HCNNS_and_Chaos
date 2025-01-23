@@ -14,7 +14,202 @@ class CustomLinear(nn.Linear):
         if bias:
             nn.init.uniform_(self.bias.data, self.init_range[0], self.init_range[1])
 
+import torch
+import pytest
+from torch.nn import MSELoss
+from typing import Tuple
+# from custom_linear import CustomLinear  # Import the updated CustomLinear class
+import torch
+import torch.nn as nn
+from typing import Optional, Tuple
 
+
+class CustomSparseLinear(nn.Linear):
+    def __init__(self, n_hid_vars: int, 
+                 bias: bool = False,
+                 init_range: Tuple[float, float] = (-0.75, 0.75),
+                 sparsity: float = 0.0,
+                 mask_type: str = "random",
+                 p: Optional[int] = None,
+                 device: Optional[torch.device] = None):
+        """
+        CustomLinear layer with sparsity applied based on the mask type.
+
+        Parameters
+        ----------
+        n_hid_vars : int
+            Number of hidden variables (both input and output features).
+        bias : bool, optional
+            If True, includes a bias term. Default is False.
+        init_range : Tuple[float, float], optional
+            Range for uniform initialization of weights. Default is (-0.75, 0.75).
+        sparsity : float, optional
+            Proportion of weights to set to zero (random sparsity). Default is 0.0 (no sparsity).
+        mask_type : str, optional
+            Type of mask to apply. Options:
+            - "random": Random sparsity over the entire weight matrix.
+            - "non_obs_only": Sparsity applied only on the non-observable block of the weight matrix.
+        p : int, optional
+            Number of observable variables when using `non_obs_only` mask type.
+        device : torch.device, optional
+            The device to use for computations. If not specified, automatically selects
+            `cuda`, `mps`, or `cpu` based on availability.
+
+        Notes
+        -----
+        - For `random`, the entire weight matrix has a proportion of its elements randomly zeroed out.
+        - For `non_obs_only`, sparsity is applied to the lower-right block of the weight matrix
+          (size `(n_hid_vars - p, n_hid_vars)`) with `p` observable variables.
+        """
+        self.device = device if device else self._get_default_device()
+
+        super(CustomSparseLinear, self).__init__(n_hid_vars, n_hid_vars, bias=bias, device=self.device)
+
+        self.init_range = init_range
+
+        """
+        Raises
+        ------
+        ValueError
+            If `sparsity` is not between 0 and 1.
+        """
+        if not (0 <= sparsity <= 1):
+            raise ValueError("Sparsity must be between 0 and 1.")
+        self.sparsity = sparsity
+        self.mask_type = mask_type
+        self.p = p
+        self.n_hid_vars = n_hid_vars
+
+        # Initialize weights and biases
+        self._initialize_weights()
+
+        # Generate the mask based on the mask type
+        self.mask = self._generate_mask()
+
+        # Apply the mask to the weights
+        self._apply_mask()
+
+        # Register hook to enforce the mask during backpropagation
+        self.weight.register_hook(self._enforce_mask)
+
+    def _get_default_device(self) -> torch.device:
+        """
+        Determines the default device to use for computations.
+
+        Returns
+        -------
+        torch.device
+            The default device (`cuda`, `mps`, or `cpu`).
+        """
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        elif torch.backends.mps.is_available():
+            return torch.device("mps")
+        else:
+            return torch.device("cpu")
+
+    def _initialize_weights(self):
+        """
+        Initializes weights and biases within the specified range.
+        """
+        nn.init.uniform_(self.weight.data, self.init_range[0], self.init_range[1])
+        if self.bias is not None:
+            nn.init.uniform_(self.bias.data, self.init_range[0], self.init_range[1])
+
+    def _generate_mask(self) -> torch.Tensor:
+        """
+        Generates the sparsity mask based on the specified `mask_type`.
+
+        Returns
+        -------
+        torch.Tensor
+            Binary mask of shape `(n_hid_vars, n_hid_vars)`.
+
+        Raises
+        ------
+        ValueError
+            If an invalid `mask_type` is provided.
+        """
+        mask = torch.ones(self.n_hid_vars, self.n_hid_vars, device=self.device)
+
+        if self.mask_type == "random":
+            # Random sparsity over the entire weight matrix
+            total_weights = self.n_hid_vars * self.n_hid_vars
+            zeroed_weights = int(self.sparsity * total_weights)
+            random_indices = torch.randperm(total_weights, device=self.device)[:zeroed_weights]
+            flat_mask = mask.view(-1)
+            flat_mask[random_indices] = 0.0
+            mask = flat_mask.view(self.n_hid_vars, self.n_hid_vars)
+
+        elif self.mask_type == "non_obs_only":
+            if self.p is None or not (0 < self.p < self.n_hid_vars):
+                raise ValueError("`p` must be provided and satisfy 0 < p < n_hid_vars for `non_obs_only`.")
+
+            # Split the weight matrix into two blocks
+            obs_block = torch.ones((self.n_hid_vars, self.p), device=self.device)  # (n_hid_vars, p)
+            non_obs_block = torch.ones((self.n_hid_vars, self.n_hid_vars - self.p), device=self.device)  # (n_hid_vars, n_hid_vars - p)
+
+            # Apply sparsity only on the non-observable block
+            total_weights_non_obs = non_obs_block.numel()
+            zeroed_weights = int(self.sparsity * total_weights_non_obs)
+            random_indices = torch.randperm(total_weights_non_obs, device=self.device)[:zeroed_weights]
+            flat_non_obs = non_obs_block.view(-1)
+            flat_non_obs[random_indices] = 0.0
+            non_obs_block = flat_non_obs.view(self.n_hid_vars, self.n_hid_vars - self.p)
+
+            # Combine the blocks to form the mask
+            mask = torch.cat((obs_block, non_obs_block), dim=1)
+
+        else:
+            raise ValueError(f"Invalid mask_type: {self.mask_type}. Must be 'random' or 'non_obs_only'.")
+
+        return mask
+
+    def _apply_mask(self):
+        """
+        Applies the mask to the weight matrix.
+        """
+        self.weight.data *= self.mask
+
+    def _enforce_mask(self, grad: torch.Tensor) -> torch.Tensor:
+        """
+        Hook to enforce the mask during backpropagation.
+
+        Ensures that:
+        - The zeroed-out weights remain zeroed and are not updated.
+        - The gradients corresponding to zeroed-out weights are also set to zero.
+
+        Parameters
+        ----------
+        grad : torch.Tensor
+            Gradient of the loss with respect to the weight matrix.
+
+        Returns
+        -------
+        torch.Tensor
+            Modified gradient respecting the mask.
+        """
+        with torch.no_grad():
+            # Enforce the mask on the weights
+            self.weight.data *= self.mask
+        # Zero out gradients for masked weights
+        return grad * self.mask
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass for the CustomLinear layer.
+
+        Parameters
+        ----------
+        input : torch.Tensor
+            Input tensor of shape `(batch_size, n_hid_vars)`.
+
+        Returns
+        -------
+        torch.Tensor
+            Output tensor of shape `(batch_size, n_hid_vars)`.
+        """
+        return nn.functional.linear(input, self.weight, self.bias)
 class vanilla_cell(nn.Module):
     """
     Vanilla HCNN Cell.
