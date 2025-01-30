@@ -1,6 +1,8 @@
 import torch
 from typing import Optional , Tuple
 import torch.nn as nn
+# import pytest
+from torch.nn import MSELoss
 
 class CustomLinear(nn.Linear):
     def __init__(self, in_features: int, out_features: int, bias: bool = False,
@@ -14,14 +16,6 @@ class CustomLinear(nn.Linear):
         if bias:
             nn.init.uniform_(self.bias.data, self.init_range[0], self.init_range[1])
 
-import torch
-import pytest
-from torch.nn import MSELoss
-from typing import Tuple
-# from custom_linear import CustomLinear  # Import the updated CustomLinear class
-import torch
-import torch.nn as nn
-from typing import Optional, Tuple
 
 
 class CustomSparseLinear(nn.Linear):
@@ -210,6 +204,7 @@ class CustomSparseLinear(nn.Linear):
             Output tensor of shape `(batch_size, n_hid_vars)`.
         """
         return nn.functional.linear(input, self.weight, self.bias)
+
 class vanilla_cell(nn.Module):
     """
     Vanilla HCNN Cell.
@@ -318,9 +313,11 @@ class vanilla_cell(nn.Module):
           internal computation.
         """
     # Compute the expected output (y_hat)
-        expectation = torch.matmul(self.ConMat, state)
+        # expectation = torch.matmul(self.ConMat, state)
 
-        print("expectation requires_grad:", expectation.requires_grad)
+        expectation = torch.matmul(state , self.ConMat.T)
+
+        # print("expectation requires_grad:", expectation.requires_grad)
         if teacher_forcing:
 
             if observation is None:
@@ -330,7 +327,7 @@ class vanilla_cell(nn.Module):
             delta_term = observation - expectation
 
             # Teacher forcing: Correct the state using the delta term
-            teach_forc = torch.matmul(self.ConMat.T, delta_term)
+            teach_forc = torch.matmul(delta_term,self.ConMat)
 
             r_state = state - teach_forc
             next_state = self.A(torch.tanh(r_state))
@@ -405,9 +402,9 @@ class partial_teacher_forcing(nn.Dropout):
             return (1 - self.p) * scaled_output #applies prob dropout without inplace
 
         
-
-
+        
 class ptf_cell(nn.Module):
+
     """
     Partial Teacher Forcing HCNN Cell.
 
@@ -439,36 +436,20 @@ class ptf_cell(nn.Module):
         Performs a forward pass with optional partial teacher forcing during state transitions.
     """
 
-
-    def __init__(self, n_obs: int , 
-                 n_hid_vars: int , 
-                 init_range: Tuple[float,float] = (-0.75,0.75)):
-
+    def __init__(self, n_obs: int, n_hid_vars: int, init_range: Tuple[float, float] = (-0.75, 0.75)):
         super(ptf_cell, self).__init__()
         self.n_obs = n_obs
         self.n_hid_vars = n_hid_vars
 
-        # Parameter initialization 
-         
-        self.A = CustomLinear(in_features =n_hid_vars, out_features =n_hid_vars , bias = False ,init_range = init_range)
-
-        self.register_buffer(name = 'ConMat', tensor= torch.eye(n_obs, n_hid_vars), persistent = False)
-        
-        self.register_buffer(name = 'Ide', tensor= torch.eye(n_hid_vars ), persistent = False)
+        # Initialize layers and buffers
+        self.A = CustomLinear(n_hid_vars, n_hid_vars, bias=False, init_range=init_range)
+        self.register_buffer(name='ConMat', tensor=torch.eye(n_obs, n_hid_vars), persistent=False)
+        self.register_buffer(name='Ide', tensor=torch.eye(n_hid_vars), persistent=False)
 
         # Select device
         self.device = self._get_default_device()
-        
+
     def _get_default_device(self) -> torch.device:
-
-        """
-        Determines the default device to use for computations.
-
-        Returns
-        -------
-        torch.device
-            The default device (`cuda`, `mps`, or `cpu`).
-        """
         if torch.cuda.is_available():
             return torch.device("cuda")
         elif torch.backends.mps.is_available():
@@ -477,6 +458,7 @@ class ptf_cell(nn.Module):
             return torch.device("cpu")
 
     def ptf_dropout(self, prob: float) -> nn.Module:
+
         """
         Creates a dropout module for applying partial teacher forcing.
 
@@ -491,12 +473,12 @@ class ptf_cell(nn.Module):
         nn.Module
             A `partial_teacher_forcing` dropout module initialized with the given probability.
         """
-        return partial_teacher_forcing(p=prob )
 
+        return partial_teacher_forcing(p=prob)
 
-    def forward(self, state: torch.Tensor, teacher_forcing: bool, 
-                prob: Optional[float] =  None, 
-                observation: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor],Optional[torch.Tensor]]:
+    def forward(self, state: torch.Tensor, teacher_forcing: bool, prob: Optional[float] = None,
+                observation: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
+        # Compute expected output (y_hat)
         """
         Forward pass of the Partial Teacher Forcing HCNN Cell.
 
@@ -536,38 +518,21 @@ class ptf_cell(nn.Module):
         being used to compute the next state.
         - Without teacher forcing, the next state is computed purely from the model's prediction.
         """
-
-    # Compute the expected output (y_hat)
         expectation = torch.matmul(self.ConMat, state)
 
-#print("expectation requires_grad:", expectation.requires_grad)
         if teacher_forcing:
-
             if observation is None:
                 raise ValueError("`observation` must be provided when `teacher_forcing` is True.")
-
-            # Compute the delta term (y_true - y_hat)
             delta_term = observation - expectation
-
-            partial_delta_term =  self.ptf_dropout(prob = prob)(delta_term)
-
-            # Teacher forcing: Correct the state using the delta term
+            partial_delta_term = self.ptf_dropout(prob)(delta_term)
             teach_forc = torch.matmul(self.ConMat.T, partial_delta_term)
-
             r_state = state - teach_forc
             next_state = self.A(torch.tanh(r_state))
-
-
-            return expectation, next_state, delta_term , partial_delta_term
+            return expectation, next_state, delta_term, partial_delta_term
         else:
-            # Without teacher forcing: State evolves independently
             r_state = torch.matmul(self.Ide, state)
             next_state = self.A(torch.tanh(r_state))
-
-
-            return expectation, next_state, None , None 
-        
-
+            return expectation, next_state, None, None
 
 
 class DiagonalMatrix(nn.Linear):
@@ -611,6 +576,8 @@ class DiagonalMatrix(nn.Linear):
 
 
 
+
+
 class lstm_cell(nn.Module):
     """
     LSTM Formulation of the HCNN (LForm HCNN Cell).
@@ -644,39 +611,21 @@ class lstm_cell(nn.Module):
         and updating the internal state (`next_state`).
     """
 
-
-
-    def __init__(self, n_obs: int, 
-                 n_hid_vars: int , 
-                 init_range: Tuple[float,float] = (-0.75,0.75)):
-
+    def __init__(self, n_obs: int, n_hid_vars: int, init_range: Tuple[float, float] = (-0.75, 0.75)):
         super(lstm_cell, self).__init__()
         self.n_obs = n_obs
         self.n_hid_vars = n_hid_vars
 
-        # Parameter initialization 
-         
-        self.A = CustomLinear(in_features = n_hid_vars, out_features =n_hid_vars , bias = False ,init_range = init_range)
-        
-        self.D = DiagonalMatrix(in_features =n_hid_vars, out_features =n_hid_vars , bias = False ,init_diag = 1.)
-
-        self.register_buffer(name = 'ConMat', tensor= torch.eye(n_obs, n_hid_vars), persistent = False)
-        
-        self.register_buffer(name = 'Ide', tensor= torch.eye(n_hid_vars ), persistent = False)
+        # Initialize layers
+        self.A = CustomLinear(n_hid_vars, n_hid_vars, bias=False, init_range=init_range)
+        self.D = DiagonalMatrix(n_hid_vars, n_hid_vars, bias=False, init_diag=1.0)
+        self.register_buffer(name='ConMat', tensor=torch.eye(n_obs, n_hid_vars), persistent=False)
+        self.register_buffer(name='Ide', tensor=torch.eye(n_hid_vars), persistent=False)
 
         # Select device
         self.device = self._get_default_device()
-        
+
     def _get_default_device(self) -> torch.device:
-
-        """
-        Determines the default device to use for computations.
-
-        Returns
-        -------
-        torch.device
-            The default device (`cuda`, `mps`, or `cpu`).
-        """
         if torch.cuda.is_available():
             return torch.device("cuda")
         elif torch.backends.mps.is_available():
@@ -684,9 +633,9 @@ class lstm_cell(nn.Module):
         else:
             return torch.device("cpu")
 
-
     def forward(self, state: torch.Tensor, teacher_forcing: bool,
                 observation: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+        
         """
         Forward pass of the LSTM HCNN Cell.
 
@@ -730,43 +679,29 @@ class lstm_cell(nn.Module):
             - Add an adjusted residual term using the diagonal matrix (`D`).
         """
 
-    # Compute the expected output (y_hat)
+        
+        # Compute expected output (y_hat)
         expectation = torch.matmul(self.ConMat, state)
 
-        print("expectation requires_grad:", expectation.requires_grad)
         if teacher_forcing:
-
             if observation is None:
                 raise ValueError("`observation` must be provided when `teacher_forcing` is True.")
-
-            # Compute the delta term (y_true - y_hat)
             delta_term = observation - expectation
-
-            # Teacher forcing: Correct the state using the delta term
             teach_forc = torch.matmul(self.ConMat.T, delta_term)
-
             r_state = state - teach_forc
-
-            lstm_block = self.A(torch.tanh(r_state)) -  r_state
-
+            lstm_block = self.A(torch.tanh(r_state)) - r_state
             next_state = r_state + self.D(lstm_block)
-
-
             return expectation, next_state, delta_term
         else:
-            # Without teacher forcing: State evolves independently
             r_state = torch.matmul(self.Ide, state)
-            
-            lstm_block = self.A(torch.tanh(r_state)) -  r_state
-
+            lstm_block = self.A(torch.tanh(r_state)) - r_state
             next_state = r_state + self.D(lstm_block)
-
-
             return expectation, next_state, None
-        
+
 
 
 class LargeSparse_cell(nn.Module):
+
     """
     Large Sparse HCNN Cell.
 
@@ -796,12 +731,11 @@ class LargeSparse_cell(nn.Module):
         and updating the internal state (`next_state`).
     """
 
-    def __init__(self, n_obs: int, 
-                 n_hid_vars: int, 
-                 init_range: Tuple[float, float] = (-0.75, 0.75),
-                 sparsity: float = 0.0,
-                 mask_type: str = "random",
-                 p: Optional[int] = None):
+
+    def __init__(self, n_obs: int, n_hid_vars: int, init_range: Tuple[float, float] = (-0.75, 0.75),
+                 sparsity: float = 0.0, mask_type: str = "random", p: Optional[int] = None):
+        
+
         """
         Initializes the Large Sparse HCNN Cell with a sparsity-enabled CustomSparseLinear.
 
@@ -820,21 +754,15 @@ class LargeSparse_cell(nn.Module):
         p : int, optional
             Number of observable variables for "non_obs_only" mask type. Required if `mask_type` is "non_obs_only".
         """
+
+        
         super(LargeSparse_cell, self).__init__()
         self.n_obs = n_obs
         self.n_hid_vars = n_hid_vars
 
-        # Initialize the sparse CustomSparseLinear layer
-        self.Sparse_A = CustomSparseLinear(
-            n_hid_vars=n_hid_vars,
-            bias=False,
-            init_range=init_range,
-            sparsity=sparsity,
-            mask_type=mask_type,
-            p=p
-        )
-
-        # Register connection and identity matrices
+        # Initialize sparse transformation
+        self.Sparse_A = CustomSparseLinear(n_hid_vars, bias=False, init_range=init_range,
+                                           sparsity=sparsity, mask_type=mask_type, p=p)
         self.register_buffer(name='ConMat', tensor=torch.eye(n_obs, n_hid_vars), persistent=False)
         self.register_buffer(name='Ide', tensor=torch.eye(n_hid_vars), persistent=False)
 
@@ -842,14 +770,6 @@ class LargeSparse_cell(nn.Module):
         self.device = self._get_default_device()
 
     def _get_default_device(self) -> torch.device:
-        """
-        Determines the default device to use for computations.
-
-        Returns
-        -------
-        torch.device
-            The default device (`cuda`, `mps`, or `cpu`).
-        """
         if torch.cuda.is_available():
             return torch.device("cuda")
         elif torch.backends.mps.is_available():
@@ -859,6 +779,7 @@ class LargeSparse_cell(nn.Module):
 
     def forward(self, state: torch.Tensor, teacher_forcing: bool,
                 observation: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+        
         """
         Forward pass of the Large Sparse HCNN Cell.
 
@@ -900,27 +821,18 @@ class LargeSparse_cell(nn.Module):
             - Compute the residual state (`r_state`).
             - Apply a non-linear transformation using the `CustomSparseLinear` layer (`Sparse_A`).
         """
-        # Compute the expected output (y_hat)
+        # Compute expected output (y_hat)
         expectation = torch.matmul(self.ConMat, state)
 
         if teacher_forcing:
             if observation is None:
                 raise ValueError("`observation` must be provided when `teacher_forcing` is True.")
-
-            # Compute the delta term (y_true - y_hat)
             delta_term = observation - expectation
-
-            # Teacher forcing: Correct the state using the delta term
             teach_forc = torch.matmul(self.ConMat.T, delta_term)
-
-            # Residual state and next state
             r_state = state - teach_forc
             next_state = self.Sparse_A(torch.tanh(r_state))
-
             return expectation, next_state, delta_term
         else:
-            # Without teacher forcing: State evolves independently
             r_state = torch.matmul(self.Ide, state)
             next_state = self.Sparse_A(torch.tanh(r_state))
-
             return expectation, next_state, None
