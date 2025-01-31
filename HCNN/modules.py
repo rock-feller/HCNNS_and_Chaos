@@ -8,9 +8,9 @@ class CustomLinear(nn.Linear):
     def __init__(self, in_features: int, out_features: int, bias: bool = False,
                  init_range: Tuple[float, float] = (-0.75, 0.75)):
         """CustomLinear layer with user-defined weight initialization range."""
-        self.init_range = init_range
+        
         super(CustomLinear, self).__init__(in_features, out_features, bias=bias)
-
+        self.init_range = init_range
         # Properly initialize weights and biases
         nn.init.uniform_(self.weight.data, self.init_range[0], self.init_range[1])
         if bias:
@@ -336,7 +336,7 @@ class vanilla_cell(nn.Module):
             return expectation, next_state, delta_term
         else:
             # Without teacher forcing: State evolves independently
-            r_state = torch.matmul(self.Ide, state)
+            r_state = torch.matmul( state,self.Ide)
             next_state = self.A(torch.tanh(r_state))
 
 
@@ -518,20 +518,28 @@ class ptf_cell(nn.Module):
         being used to compute the next state.
         - Without teacher forcing, the next state is computed purely from the model's prediction.
         """
-        expectation = torch.matmul(self.ConMat, state)
+        expectation = torch.matmul(state , self.ConMat.T)
 
         if teacher_forcing:
             if observation is None:
                 raise ValueError("`observation` must be provided when `teacher_forcing` is True.")
+            
             delta_term = observation - expectation
+            
             partial_delta_term = self.ptf_dropout(prob)(delta_term)
-            teach_forc = torch.matmul(self.ConMat.T, partial_delta_term)
+            
+            # Teacher forcing: Correct the state using the delta term
+            teach_forc = torch.matmul(partial_delta_term,self.ConMat)
+            
             r_state = state - teach_forc
+            
             next_state = self.A(torch.tanh(r_state))
+            
             return expectation, next_state, delta_term, partial_delta_term
         else:
-            r_state = torch.matmul(self.Ide, state)
+            r_state = torch.matmul(state, self.Ide )
             next_state = self.A(torch.tanh(r_state))
+            
             return expectation, next_state, None, None
 
 
@@ -681,21 +689,31 @@ class lstm_cell(nn.Module):
 
         
         # Compute expected output (y_hat)
-        expectation = torch.matmul(self.ConMat, state)
+        expectation = torch.matmul(state , self.ConMat.T)
 
         if teacher_forcing:
+            
             if observation is None:
                 raise ValueError("`observation` must be provided when `teacher_forcing` is True.")
+            
             delta_term = observation - expectation
-            teach_forc = torch.matmul(self.ConMat.T, delta_term)
+            
+            teach_forc = torch.matmul(delta_term,self.ConMat)
+            
             r_state = state - teach_forc
+            
             lstm_block = self.A(torch.tanh(r_state)) - r_state
+            
             next_state = r_state + self.D(lstm_block)
+            
             return expectation, next_state, delta_term
         else:
-            r_state = torch.matmul(self.Ide, state)
+            r_state = torch.matmul( state,self.Ide)
+
             lstm_block = self.A(torch.tanh(r_state)) - r_state
+
             next_state = r_state + self.D(lstm_block)
+
             return expectation, next_state, None
 
 
@@ -732,8 +750,8 @@ class LargeSparse_cell(nn.Module):
     """
 
 
-    def __init__(self, n_obs: int, n_hid_vars: int, init_range: Tuple[float, float] = (-0.75, 0.75),
-                 sparsity: float = 0.0, mask_type: str = "random", p: Optional[int] = None):
+    def __init__(self, n_obs: int, n_hid_vars: int,  init_range: Tuple[float, float] = (-0.75, 0.75),
+                 sparsity: float = 0.0, mask_type: str = "random"):
         
 
         """
@@ -755,14 +773,14 @@ class LargeSparse_cell(nn.Module):
             Number of observable variables for "non_obs_only" mask type. Required if `mask_type` is "non_obs_only".
         """
 
-        
+
         super(LargeSparse_cell, self).__init__()
         self.n_obs = n_obs
         self.n_hid_vars = n_hid_vars
 
         # Initialize sparse transformation
         self.Sparse_A = CustomSparseLinear(n_hid_vars, bias=False, init_range=init_range,
-                                           sparsity=sparsity, mask_type=mask_type, p=p)
+                                           sparsity=sparsity, mask_type=mask_type, p=n_obs)
         self.register_buffer(name='ConMat', tensor=torch.eye(n_obs, n_hid_vars), persistent=False)
         self.register_buffer(name='Ide', tensor=torch.eye(n_hid_vars), persistent=False)
 
@@ -822,17 +840,29 @@ class LargeSparse_cell(nn.Module):
             - Apply a non-linear transformation using the `CustomSparseLinear` layer (`Sparse_A`).
         """
         # Compute expected output (y_hat)
-        expectation = torch.matmul(self.ConMat, state)
+        expectation = torch.matmul(state , self.ConMat.T)
 
         if teacher_forcing:
+
             if observation is None:
+
                 raise ValueError("`observation` must be provided when `teacher_forcing` is True.")
+            
             delta_term = observation - expectation
-            teach_forc = torch.matmul(self.ConMat.T, delta_term)
+            
+    
+            teach_forc = torch.matmul(delta_term,self.ConMat)
+            
             r_state = state - teach_forc
+            
             next_state = self.Sparse_A(torch.tanh(r_state))
+            
             return expectation, next_state, delta_term
+       
         else:
-            r_state = torch.matmul(self.Ide, state)
+    
+            r_state = torch.matmul( state,self.Ide)
+            
             next_state = self.Sparse_A(torch.tanh(r_state))
+            
             return expectation, next_state, None
